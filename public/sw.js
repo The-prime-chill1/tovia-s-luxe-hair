@@ -1,4 +1,4 @@
-const CACHE_NAME = "tovia-app-v1";
+const CACHE_NAME = "tovia-app-v2";
 const APP_SHELL = ["/", "/index.html", "/site.webmanifest", "/pwa-192.png", "/pwa-512.png", "/tovias-logo.svg"];
 
 self.addEventListener("install", (event) => {
@@ -28,7 +28,10 @@ self.addEventListener("fetch", (event) => {
 
   if (url.origin !== self.location.origin) return;
   event.respondWith(fetch(request).then((response) => {
-    if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+    if (response.ok) {
+      const copy = response.clone();
+      event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)));
+    }
     return response;
   }).catch(() => caches.match(request).then((cached) => cached || (request.mode === "navigate" ? caches.match("/index.html") : Response.error()))));
 });

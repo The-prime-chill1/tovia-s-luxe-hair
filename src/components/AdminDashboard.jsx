@@ -4,6 +4,8 @@ import {
   ArrowRight,
   Bell,
   Check,
+  Eye,
+  EyeOff,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -19,7 +21,7 @@ import {
 } from "lucide-react";
 import { PRODUCTS } from "../data/products";
 import { STORE_CONFIG } from "../data/storeConfig";
-import { createAdminProduct, deleteAdminProduct, fetchAdminData, getCurrentAdmin, isSupabaseConfigured, sendAdminPasswordReset, setAdminProductStatus, signInAdmin, signOutAdmin, subscribeToAdminChanges, updateAdminRecord, updateInvitedUserPassword } from "../lib/supabase";
+import { createAdminProduct, deleteAdminProduct, fetchAdminData, getCurrentAdmin, hasPasswordSetupSession, isSupabaseConfigured, sendAdminPasswordReset, setAdminProductStatus, signInAdmin, signOutAdmin, subscribeToAdminChanges, updateAdminRecord, updateInvitedUserPassword } from "../lib/supabase";
 
 const tabs = [
   ["Overview", LayoutDashboard],
@@ -35,37 +37,62 @@ function EmptyState({ icon: Icon, title, text }) {
   return <div className="admin-empty"><span><Icon /></span><h3>{title}</h3><p>{text}</p></div>;
 }
 
+function PasswordField({ label, name, autoComplete, placeholder }) {
+  const [visible, setVisible] = useState(false);
+  return <label>{label}<span className="admin-password-field"><input required name={name} type={visible ? "text" : "password"} minLength="12" autoComplete={autoComplete} placeholder={placeholder} /><button className="admin-password-toggle" type="button" onClick={() => setVisible((current) => !current)} aria-label={`${visible ? "Hide" : "Show"} ${label.toLowerCase()}`}>{visible ? <EyeOff /> : <Eye />}<span>{visible ? "Hide" : "Show"}</span></button></span></label>;
+}
+
 function AdminLogin({ onEnter }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [mode, setMode] = useState("login");
   const [resetSent, setResetSent] = useState(false);
+  const [email, setEmail] = useState(() => localStorage.getItem("tovia-admin-email") || "");
+  const [rememberEmail, setRememberEmail] = useState(() => Boolean(localStorage.getItem("tovia-admin-email")));
   const submit = async (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
+    const normalizedEmail = String(values.email).trim().toLowerCase();
     setLoading(true); setError("");
     try {
-      if (mode === "reset") { await sendAdminPasswordReset(values.email); setResetSent(true); }
-      else await onEnter(values.email, values.password);
+      if (mode === "reset") { await sendAdminPasswordReset(normalizedEmail); setResetSent(true); }
+      else {
+        await onEnter(normalizedEmail, values.password);
+        if (rememberEmail) localStorage.setItem("tovia-admin-email", normalizedEmail);
+        else localStorage.removeItem("tovia-admin-email");
+      }
     }
     catch (loginError) { setError(loginError.message); }
     finally { setLoading(false); }
   };
-  return <main className="admin-login"><section><div className="admin-login-brand"><span>T</span><div><b>TOVIA’S</b><small>STORE ADMIN</small></div></div><span className="admin-kicker">Private workspace</span><h1>{mode === "reset" ? "Reset password." : "Welcome back."}</h1><p>{mode === "reset" ? "Enter either approved admin email and we’ll send a secure recovery link." : "Manage orders, products, reviews, and customer enquiries."}</p>{resetSent ? <div className="admin-password-success"><Check /><h2>Check your email.</h2><p>If this is an approved admin address, a recovery link is on its way.</p><button className="admin-primary" onClick={() => { setMode("login"); setResetSent(false); }}>Return to sign in</button></div> : <form onSubmit={submit}><label>Email address<input required name="email" type="email" autoComplete="username" placeholder="Admin email address" /></label>{mode === "login" && <label>Password<input required name="password" type="password" minLength="12" autoComplete="current-password" placeholder="Enter your password" /></label>}{error && <p className="admin-login-error">{error}</p>}<button disabled={loading || !isSupabaseConfigured} className="admin-primary">{loading ? "Please wait…" : mode === "reset" ? "Send recovery email" : "Sign in securely"} <ArrowRight /></button></form>}<button className="admin-forgot" type="button" onClick={() => { setMode(mode === "login" ? "reset" : "login"); setError(""); setResetSent(false); }}>{mode === "login" ? "Forgot your password?" : "Return to sign in"}</button><small className="admin-demo-note">{isSupabaseConfigured ? "Protected by Supabase Auth and admin-only database policies." : "Supabase is not configured yet. Add the project URL and publishable key to .env.local."}</small><Link to="/">← Return to storefront</Link></section><aside><span>STORE CONTROL</span><h2>Everything your<br /><em>luxe business needs.</em></h2><div><p><Check /> Orders in one place</p><p><Check /> Real product uploads</p><p><Check /> Verified review moderation</p><p><Check /> Customer support inbox</p></div></aside></main>;
+  return <main className="admin-login"><section><div className="admin-login-brand"><span>T</span><div><b>TOVIA’S</b><small>STORE ADMIN</small></div></div><span className="admin-kicker">Private workspace</span><h1>{mode === "reset" ? "Reset password." : "Welcome back."}</h1><p>{mode === "reset" ? "Enter either approved admin email and we’ll send a secure recovery link." : "Manage orders, products, reviews, and customer enquiries."}</p>{resetSent ? <div className="admin-password-success"><Check /><h2>Check your email.</h2><p>If this is an approved admin address, a recovery link is on its way.</p><button className="admin-primary" onClick={() => { setMode("login"); setResetSent(false); }}>Return to sign in</button></div> : <form onSubmit={submit}><label>Email address<input required name="email" type="email" autoComplete="username" placeholder="Admin email address" value={email} onChange={(event) => setEmail(event.target.value)} /></label>{mode === "login" && <PasswordField label="Password" name="password" autoComplete="current-password" placeholder="Enter your password" />}{mode === "login" && <label className="admin-remember"><input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /><span>Remember this email on this device</span></label>}{error && <p className="admin-login-error">{error}</p>}<button disabled={loading || !isSupabaseConfigured} className="admin-primary">{loading ? "Please wait…" : mode === "reset" ? "Send recovery email" : "Sign in securely"} <ArrowRight /></button></form>}<button className="admin-forgot" type="button" onClick={() => { setMode(mode === "login" ? "reset" : "login"); setError(""); setResetSent(false); }}>{mode === "login" ? "Forgot your password?" : "Return to sign in"}</button><small className="admin-demo-note">{isSupabaseConfigured ? "Successful sessions stay signed in until you log out. Passwords are never stored by this site." : "Supabase is not configured yet. Add the project URL and publishable key to .env.local."}</small><Link to="/">← Return to storefront</Link></section><aside><span>STORE CONTROL</span><h2>Everything your<br /><em>luxe business needs.</em></h2><div><p><Check /> Orders in one place</p><p><Check /> Real product uploads</p><p><Check /> Verified review moderation</p><p><Check /> Customer support inbox</p></div></aside></main>;
 }
 
 function AdminSetPassword() {
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
+  const [linkState, setLinkState] = useState("checking");
+  useEffect(() => {
+    let active = true;
+    hasPasswordSetupSession().then((hasSession) => {
+      if (active) setLinkState(hasSession ? "valid" : "invalid");
+    }).catch(() => { if (active) setLinkState("invalid"); });
+    return () => { active = false; };
+  }, []);
   const submit = async (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
     if (values.password !== values.confirm_password) { setError("The passwords do not match."); return; }
     setStatus("loading"); setError("");
-    try { await updateInvitedUserPassword(values.password); setStatus("success"); }
+    try {
+      const user = await updateInvitedUserPassword(values.password);
+      if (user?.email) localStorage.setItem("tovia-admin-email", user.email.toLowerCase());
+      await signOutAdmin();
+      setStatus("success");
+    }
     catch (passwordError) { setError(passwordError.message); setStatus("idle"); }
   };
-  return <main className="admin-login"><section><div className="admin-login-brand"><span>T</span><div><b>TOVIA’S</b><small>STORE ADMIN</small></div></div><span className="admin-kicker">Admin invitation</span><h1>Set your password.</h1><p>Create a private password for your Tovia’s admin account. Use at least 12 characters.</p>{status === "success" ? <div className="admin-password-success"><Check /><h2>Password saved.</h2><p>Your account is ready. Sign in securely to continue.</p><Link className="admin-primary" to="/admin">Go to admin sign in <ArrowRight /></Link></div> : <form onSubmit={submit}><label>New password<input required name="password" type="password" minLength="12" autoComplete="new-password" /></label><label>Confirm password<input required name="confirm_password" type="password" minLength="12" autoComplete="new-password" /></label>{error && <p className="admin-login-error">{error}</p>}<button disabled={status === "loading" || !isSupabaseConfigured} className="admin-primary">{status === "loading" ? "Saving password…" : "Set password"} <ArrowRight /></button></form>}<small className="admin-demo-note">If this invitation link has expired, ask the store owner to send a new one.</small><Link to="/">← Return to storefront</Link></section><aside><span>WELCOME TO TOVIA’S</span><h2>Your secure<br /><em>workspace awaits.</em></h2><div><p><Check /> Protected account access</p><p><Check /> Private customer records</p><p><Check /> Review moderation</p><p><Check /> Order management</p></div></aside></main>;
+  return <main className="admin-login"><section><div className="admin-login-brand"><span>T</span><div><b>TOVIA’S</b><small>STORE ADMIN</small></div></div><span className="admin-kicker">Admin invitation</span><h1>Set your password.</h1><p>Create a private password for your Tovia’s admin account. Use at least 12 characters.</p>{status === "success" ? <div className="admin-password-success"><Check /><h2>Password saved.</h2><p>Your email is remembered. Sign in with the password you just created.</p><Link className="admin-primary" to="/admin">Go to admin sign in <ArrowRight /></Link></div> : linkState === "invalid" ? <div className="admin-password-invalid"><h2>This link cannot be used.</h2><p>It has expired, was already opened, or belongs to an account that no longer exists.</p><Link className="admin-primary" to="/admin">Go to admin sign in <ArrowRight /></Link></div> : <form onSubmit={submit}><PasswordField label="New password" name="password" autoComplete="new-password" placeholder="Create your password" /><PasswordField label="Confirm password" name="confirm_password" autoComplete="new-password" placeholder="Enter it again" />{error && <p className="admin-login-error">{error}</p>}<button disabled={linkState === "checking" || status === "loading" || !isSupabaseConfigured} className="admin-primary">{linkState === "checking" ? "Checking secure link…" : status === "loading" ? "Saving password…" : "Set password"} <ArrowRight /></button></form>}<small className="admin-demo-note">If this invitation link has expired, use Forgot password from the admin sign-in page.</small><Link to="/">← Return to storefront</Link></section><aside><span>WELCOME TO TOVIA’S</span><h2>Your secure<br /><em>workspace awaits.</em></h2><div><p><Check /> Protected account access</p><p><Check /> Private customer records</p><p><Check /> Review moderation</p><p><Check /> Order management</p></div></aside></main>;
 }
 
 export default function AdminDashboard() {

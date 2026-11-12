@@ -133,14 +133,27 @@ export async function updateInvitedUserPassword(password) {
   if (password.length < 12) throw new Error("Use at least 12 characters for the admin password.");
   const supabase = requireConfiguredClient(await getSupabaseClient());
   const { data, error } = await supabase.auth.updateUser({ password });
+  if (error?.message?.toLowerCase().includes("session missing")) {
+    throw new Error("This password link is expired or has already been used. Request one new recovery email from the admin sign-in page.");
+  }
   if (error) throw new Error(error.message || "The invitation link is invalid or has expired.");
   return data.user;
+}
+
+export async function hasPasswordSetupSession() {
+  if (!isSupabaseConfigured) return false;
+  const supabase = requireConfiguredClient(await getSupabaseClient());
+  const { data, error } = await supabase.auth.getSession();
+  return !error && Boolean(data.session);
 }
 
 export async function sendAdminPasswordReset(email) {
   const supabase = requireConfiguredClient(await getSupabaseClient());
   const redirectTo = `${window.location.origin}/admin/set-password`;
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error?.status === 429 || error?.code === "over_email_send_rate_limit") {
+    throw new Error("Too many recovery emails were requested. Wait up to one hour, then request one new email.");
+  }
   if (error) throw new Error("We could not send the recovery email. Please try again shortly.");
 }
 

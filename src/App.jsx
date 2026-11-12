@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { CATEGORIES, PRODUCTS } from "./data/products";
 import { STORE_CONFIG } from "./data/storeConfig";
-import { createOrder, isSupabaseConfigured } from "./lib/supabase";
+import { createMessage, createOrder, createReview, fetchApprovedReviews, fetchStoreProducts, isSupabaseConfigured } from "./lib/supabase";
 
 const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
 
@@ -179,26 +179,28 @@ function SaleFeature() {
 }
 
 function ProductCard({ product, onSelect, saved = false, onToggleWishlist }) {
+  const startingVariant = product.variants.reduce((lowest, variant) => variant.salePrice < lowest.salePrice ? variant : lowest);
+  const pending = CATALOG_PENDING && !product.catalogReady;
   return (
     <article className="product-card">
       <button className="product-image" onClick={() => onSelect(product)}>
-        {CATALOG_PENDING ? <span className="product-placeholder"><Sparkles /><b>{product.category}</b><small>Product image coming soon</small></span> : <img src={product.image} alt={product.name} loading="lazy" />}
-        <span className="product-badge">{CATALOG_PENDING ? "CATALOGUE PREVIEW" : product.badge}</span>
+        {pending ? <span className="product-placeholder"><Sparkles /><b>{product.category}</b><small>Product image coming soon</small></span> : <img src={product.image} alt={product.name} loading="lazy" />}
+        <span className="product-badge">{pending ? "CATALOGUE PREVIEW" : product.badge}</span>
         <span className="quick-add">View details <ArrowRight /></span>
       </button>
       <div className="product-info">
         <small>{product.category}</small>
         <h3>{product.name}</h3>
-        <div><span>{CATALOG_PENDING ? "Price coming soon" : `From ${formatMoney(Math.min(...product.variants.map((item) => item.salePrice)))}`}</span><button className={saved ? "saved" : ""} onClick={() => onToggleWishlist(product.id)} aria-label={saved ? "Remove from wishlist" : "Save product"}><Heart fill={saved ? "currentColor" : "none"} /></button></div>
+        <div><span className="product-card-prices"><small>From</small><del>{formatMoney(startingVariant.normalPrice)}</del><strong>{formatMoney(startingVariant.salePrice)}</strong></span><button className={saved ? "saved" : ""} onClick={() => onToggleWishlist(product.id)} aria-label={saved ? "Remove from wishlist" : "Save product"}><Heart fill={saved ? "currentColor" : "none"} /></button></div>
       </div>
     </article>
   );
 }
 
-function Shop({ onSelect, featured = false, wishlist = [], onToggleWishlist }) {
+function Shop({ products = PRODUCTS, onSelect, featured = false, wishlist = [], onToggleWishlist }) {
   const [category, setCategory] = useState("All Hairs");
   const [query, setQuery] = useState("");
-  const filtered = PRODUCTS.filter((product) => (category === "All Hairs" || product.category === category) && product.name.toLowerCase().includes(query.toLowerCase()));
+  const filtered = products.filter((product) => (category === "All Hairs" || product.category === category) && product.name.toLowerCase().includes(query.toLowerCase()));
   const shownProducts = featured ? filtered.slice(0, 4) : filtered;
 
   return (
@@ -333,7 +335,7 @@ function Checkout({ cart, onClose, onComplete }) {
     event.preventDefault(); setStatus("loading");
     const order_number = `TVL-${Date.now().toString().slice(-7)}`;
     try {
-      const order = await createOrder({ ...form, order_number, items: cart.map(({ key, ...item }) => item), subtotal, delivery_fee: deliveryFee, total, payment_method: "bank_transfer", payment_status: "pending", order_status: "new" });
+      const order = await createOrder({ ...form, order_number, items: cart.map(({ key, ...item }) => item), subtotal, delivery_fee: deliveryFee, total, payment_method: "admin_contact", payment_status: "pending", order_status: "new" });
       setResult(order); setStatus("success"); onComplete();
     } catch (error) { setResult({ error: error.message }); setStatus("error"); }
   };
@@ -341,12 +343,12 @@ function Checkout({ cart, onClose, onComplete }) {
   return (
     <div className="checkout-screen">
       <header><Logo /><button className="icon-button" aria-label="Close checkout" onClick={onClose}><X /></button></header>
-      {status === "success" ? <div className="order-success"><span><Check /></span><small>Order received</small><h1>Thank you, {form.customer_name.split(" ")[0]}.</h1><p>Your order number is <b>{result.order_number}</b>. Complete your bank transfer with the details below so we can confirm your order.</p><div className="bank-card"><small>Transfer {formatMoney(total)} to</small><h3>{STORE_CONFIG.bankDetails.bankName}</h3><strong>{STORE_CONFIG.bankDetails.accountNumber}</strong><p>{STORE_CONFIG.bankDetails.accountName}</p></div><p className="success-note">After payment, send your receipt to {STORE_CONFIG.displayPhone} for confirmation.</p>{!isSupabaseConfigured && <p className="demo-warning">Demo mode: connect Supabase with the included setup file before going live.</p>}<button className="button button-primary" onClick={onClose}>Continue shopping</button></div> :
+      {status === "success" ? <div className="order-success"><span><Check /></span><small>Order request received</small><h1>Thank you, {form.customer_name.split(" ")[0]}.</h1><p>Your order number is <b>{result.order_number}</b>. The Tovia’s team now has your order and contact details.</p><div className="bank-card"><small>Order total</small><strong>{formatMoney(total)}</strong><p>Keep your phone available. An admin will contact you to confirm payment and arrange delivery.</p></div><p className="success-note">Do not send payment to an account that was not confirmed by the official Tovia’s team.</p>{!isSupabaseConfigured && <p className="demo-warning">Demo mode: connect Supabase with the included setup file before going live.</p>}<button className="button button-primary" onClick={onClose}>Continue shopping</button></div> :
       <div className="checkout-layout">
         <form onSubmit={submit} className="checkout-form"><span className="kicker">Secure checkout</span><h1>Where should we<br /><em>send your crown?</em></h1>
           <div className="field-grid"><label className="wide">Full name<input required name="customer_name" value={form.customer_name} onChange={change} placeholder="Your full name" /></label><label>Email address<input required type="email" name="email" value={form.email} onChange={change} placeholder="you@email.com" /></label><label>Phone number<input required type="tel" name="phone" value={form.phone} onChange={change} placeholder="0800 000 0000" /></label><label className="wide">Delivery address<input required name="address" value={form.address} onChange={change} placeholder="Street address and house number" /></label><label>City<input required name="city" value={form.city} onChange={change} placeholder="City" /></label><label>State<input required name="state" value={form.state} onChange={change} placeholder="State" /></label><label className="wide">Order note <small>(optional)</small><textarea name="notes" value={form.notes} onChange={change} placeholder="Anything we should know?" /></label></div>
           {status === "error" && <p className="form-error">{result.error}</p>}
-          <button disabled={status === "loading"} className="button button-primary full-button">{status === "loading" ? "Placing your order…" : `Place order · ${formatMoney(total)}`} <ArrowRight /></button><p className="checkout-disclaimer"><ShieldCheck /> Your information is encrypted and used only to fulfil your order.</p>
+          <button disabled={status === "loading"} className="button button-primary full-button">{status === "loading" ? "Sending your order…" : `Submit order · ${formatMoney(total)}`} <ArrowRight /></button><p className="checkout-disclaimer"><ShieldCheck /> Your details are securely shared only with authorized store admins for payment and delivery follow-up.</p>
         </form>
         <aside className="order-summary"><small>Your order</small><h2>{cart.reduce((sum, item) => sum + item.quantity, 0)} beautiful piece{cart.length === 1 ? "" : "s"}</h2>{cart.map((item) => <article key={item.key}><div><img src={item.image} alt="" /><b>{item.quantity}</b></div><span><strong>{item.name}</strong><small>{item.length}</small></span><b>{formatMoney(item.salePrice * item.quantity)}</b></article>)}<div className="summary-totals"><p><span>Subtotal</span><b>{formatMoney(subtotal)}</b></p><p><span>Delivery</span><b>{deliveryFee ? formatMoney(deliveryFee) : "Free"}</b></p><p><span>Total</span><strong>{formatMoney(total)}</strong></p></div><div className="summary-note"><Gift /><span><b>Free gift included</b><small>Every sale order gets something special.</small></span></div></aside>
       </div>}
@@ -372,31 +374,32 @@ function PageBanner({ kicker, title, description }) {
   );
 }
 
-function ProductPage({ onAdd }) {
+function ProductPage({ onAdd, products = PRODUCTS }) {
   const { productId } = useParams();
-  const product = PRODUCTS.find((item) => item.id === productId);
+  const product = products.find((item) => item.id === productId);
   const [variantIndex, setVariantIndex] = useState(0);
   const [activeImage, setActiveImage] = useState(0);
   if (!product) return <Navigate to="/shop" replace />;
   const variant = product.variants[variantIndex];
+  const pending = CATALOG_PENDING && !product.catalogReady;
   return (
     <main className="product-page">
       <div className="breadcrumbs"><Link to="/shop">Shop</Link><span>/</span><span>{product.category}</span></div>
       <div className="product-page-grid">
-        <div className={`product-gallery ${CATALOG_PENDING ? "pending" : ""}`}>
-          {!CATALOG_PENDING && <div className="gallery-thumbs">{product.images.map((image, index) => <button aria-label={`View product image ${index + 1}`} className={activeImage === index ? "active" : ""} key={image} onClick={() => setActiveImage(index)}><img src={image} alt="" /></button>)}</div>}
-          <div className={`gallery-main ${CATALOG_PENDING ? "gallery-placeholder" : ""}`}>{CATALOG_PENDING ? <div><Sparkles /><b>{product.category}</b><span>Official product image coming soon</span></div> : <img src={product.images[activeImage] || product.image} />}<span>{CATALOG_PENDING ? "CATALOGUE PREVIEW" : product.badge}</span></div>
+        <div className={`product-gallery ${pending ? "pending" : ""}`}>
+          {!pending && <div className="gallery-thumbs">{product.images.map((image, index) => <button aria-label={`View product image ${index + 1}`} className={activeImage === index ? "active" : ""} key={image} onClick={() => setActiveImage(index)}><img src={image} alt="" /></button>)}</div>}
+          <div className={`gallery-main ${pending ? "gallery-placeholder" : ""}`}>{pending ? <div><Sparkles /><b>{product.category}</b><span>Official product image coming soon</span></div> : <img src={product.images[activeImage] || product.image} alt={product.name} />}<span>{pending ? "CATALOGUE PREVIEW" : product.badge}</span></div>
         </div>
         <div className="product-details">
           <span className="kicker">{product.category}</span>
           <h1>{product.name}</h1>
-          <div className="price-line">{CATALOG_PENDING ? <strong>Price coming soon</strong> : <><strong>{formatMoney(variant.salePrice)}</strong><del>{formatMoney(variant.normalPrice)}</del><span>10% off</span></>}</div>
+          <div className="price-line">{pending ? <strong>Price coming soon</strong> : <><strong>{formatMoney(variant.salePrice)}</strong><del>{formatMoney(variant.normalPrice)}</del><span>Sale price</span></>}</div>
           <div className="rating-line"><span>★★★★★</span> Sale favourite</div>
           <p>{product.description}</p>
           <div className="specs"><span><small>Lace</small>{product.laceType}</span><span><small>Density</small>{product.density}</span></div>
           <label className="variant-label">Choose your length</label>
-          <div className="variant-grid">{product.variants.map((item, index) => <button className={variantIndex === index ? "active" : ""} key={item.length} onClick={() => setVariantIndex(index)}><span>{item.length}</span><small>{CATALOG_PENDING ? "Price pending" : formatMoney(item.salePrice)}</small></button>)}</div>
-          <button disabled={CATALOG_PENDING} className="button button-primary full-button product-add" onClick={() => onAdd(product, variant)}>{CATALOG_PENDING ? "Available when catalogue is confirmed" : `Add to bag · ${formatMoney(variant.salePrice)}`} <ShoppingBag /></button>
+          <div className="variant-grid">{product.variants.map((item, index) => <button className={variantIndex === index ? "active" : ""} key={item.length} onClick={() => setVariantIndex(index)}><span>{item.length}</span><small>{pending ? "Price pending" : formatMoney(item.salePrice)}</small></button>)}</div>
+          <button disabled={pending || product.status === "sold_out"} className="button button-primary full-button product-add" onClick={() => onAdd(product, variant)}>{pending ? "Available when catalogue is confirmed" : product.status === "sold_out" ? "Sold out" : `Add to bag · ${formatMoney(variant.salePrice)}`} <ShoppingBag /></button>
           <div className="product-promises"><p><Gift /><span><b>Free gift included</b><small>With every sale order</small></span></p><p><Truck /><span><b>Free delivery over ₦400,000</b><small>Applied automatically</small></span></p><p><ShieldCheck /><span><b>Secure order processing</b><small>Powered by Supabase</small></span></p></div>
         </div>
       </div>
@@ -404,16 +407,16 @@ function ProductPage({ onAdd }) {
   );
 }
 
-function HomePage({ openProduct, wishlist, onToggleWishlist }) {
-  return <><Hero /><Benefits /><Shop onSelect={openProduct} featured wishlist={wishlist} onToggleWishlist={onToggleWishlist} /><ReviewSection /></>;
+function HomePage({ products, openProduct, wishlist, onToggleWishlist }) {
+  return <><Hero /><Benefits /><Shop products={products} onSelect={openProduct} featured wishlist={wishlist} onToggleWishlist={onToggleWishlist} /><ReviewSection /></>;
 }
 
-function ShopPage({ openProduct, wishlist, onToggleWishlist }) {
-  return <><PageBanner kicker="The complete collection" title="Shop your next crown." description="Explore premium straight, wavy, curly, bob, and coloured human hair in the length made for you." /><Shop onSelect={openProduct} wishlist={wishlist} onToggleWishlist={onToggleWishlist} /></>;
+function ShopPage({ products, openProduct, wishlist, onToggleWishlist }) {
+  return <><PageBanner kicker="The complete collection" title="Shop your next crown." description="Explore premium straight, wavy, curly, bob, and coloured human hair in the length made for you." /><Shop products={products} onSelect={openProduct} wishlist={wishlist} onToggleWishlist={onToggleWishlist} /></>;
 }
 
-function SalePage({ openProduct, wishlist, onToggleWishlist }) {
-  return <><PageBanner kicker="November 24 — December 3" title="The ten-day mega sale." description="Enjoy 10% off every hair, a free gift with every order, and free delivery above ₦400,000." /><SaleFeature /><Shop onSelect={openProduct} wishlist={wishlist} onToggleWishlist={onToggleWishlist} /></>;
+function SalePage({ products, openProduct, wishlist, onToggleWishlist }) {
+  return <><PageBanner kicker="November 24 — December 3" title="The ten-day mega sale." description="Enjoy 10% off every hair, a free gift with every order, and free delivery above ₦400,000." /><SaleFeature /><Shop products={products} onSelect={openProduct} wishlist={wishlist} onToggleWishlist={onToggleWishlist} /></>;
 }
 
 function QualityPage() {
@@ -437,18 +440,24 @@ function AboutPage() {
 
 function ContactPage() {
   const [sent, setSent] = useState(false);
-  const submit = (event) => {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event) => {
     event.preventDefault();
+    const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    const messages = JSON.parse(localStorage.getItem("tovia-demo-messages") || "[]");
-    localStorage.setItem("tovia-demo-messages", JSON.stringify([{ ...data, id: `MSG-${Date.now()}`, status: "unread", created_at: new Date().toISOString() }, ...messages]));
-    setSent(true); event.currentTarget.reset();
+    setSending(true); setSent(false); setError("");
+    try {
+      await createMessage(data);
+      setSent(true); form.reset();
+    } catch (submitError) { setError(submitError.message); }
+    finally { setSending(false); }
   };
   return <>
     <PageBanner kicker="We’re here to help" title="Let’s talk about your crown." description="Questions about textures, ordering, delivery, or the upcoming sale? Reach the Tovia’s team through the channel that works for you." />
     <section className="contact-section section">
       <div className="contact-details"><span className="kicker">Contact Tovia’s</span><h2>Personal help,<br /><em>when you need it.</em></h2><p>For the fastest response, call or message during business hours. Please include your order number when asking about an existing order.</p><div className="contact-cards"><a href={`tel:${STORE_CONFIG.displayPhone}`}><span><PackageCheck /></span><div><small>Call or message</small><b>{STORE_CONFIG.displayPhone}</b></div><ArrowRight /></a><a href={STORE_CONFIG.instagramUrl} target="_blank" rel="noreferrer"><span><Camera /></span><div><small>Instagram</small><b>{STORE_CONFIG.instagramHandle}</b></div><ArrowRight /></a><a href={STORE_CONFIG.tiktokUrl} target="_blank" rel="noreferrer"><span><Sparkles /></span><div><small>TikTok</small><b>{STORE_CONFIG.tiktokHandle}</b></div><ArrowRight /></a></div></div>
-      <form className="contact-form" onSubmit={submit}><small>Send an enquiry</small><h3>How can we help?</h3><div className="field-grid"><label>Full name<input required name="name" placeholder="Your full name" /></label><label>Phone number<input required name="phone" type="tel" placeholder="0800 000 0000" /></label><label className="wide">Topic<select name="topic" defaultValue=""><option value="" disabled>Choose a topic</option><option>Product question</option><option>Order support</option><option>Delivery</option><option>Sale enquiry</option><option>Other</option></select></label><label className="wide">Message<textarea required name="message" placeholder="Tell us how we can help" /></label></div>{sent && <p className="form-success"><Check /> Thank you. Your enquiry is now in the admin preview inbox.</p>}<button className="button button-primary full-button">Send enquiry <ArrowRight /></button><p className="form-note">Live message delivery will replace local preview storage during backend setup.</p></form>
+      <form className="contact-form" onSubmit={submit}><small>Send an enquiry</small><h3>How can we help?</h3><div className="field-grid"><label>Full name<input required name="name" placeholder="Your full name" /></label><label>Phone number<input required name="phone" type="tel" placeholder="0800 000 0000" /></label><label className="wide">Topic<select name="topic" defaultValue=""><option value="" disabled>Choose a topic</option><option>Product question</option><option>Order support</option><option>Delivery</option><option>Sale enquiry</option><option>Other</option></select></label><label className="wide">Message<textarea required name="message" placeholder="Tell us how we can help" /></label></div>{sent && <p className="form-success"><Check /> Thank you. Your enquiry has been sent.</p>}{error && <p className="form-error">{error}</p>}<button disabled={sending} className="button button-primary full-button">{sending ? "Sending…" : "Send enquiry"} <ArrowRight /></button></form>
     </section>
   </>;
 }
@@ -456,13 +465,25 @@ function ContactPage() {
 function ReviewsPage() {
   const [submitted, setSubmitted] = useState(false);
   const [rating, setRating] = useState(0);
-  const [verifiedReviews] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("tovia-demo-reviews") || "[]").filter((review) => review.status === "approved"); }
-    catch { return []; }
-  });
+  const [verifiedReviews, setVerifiedReviews] = useState([]);
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  useEffect(() => { fetchApprovedReviews().then(setVerifiedReviews).catch(() => setVerifiedReviews([])); }, []);
+  const submitReview = async (event) => {
+    event.preventDefault();
+    if (!rating) return;
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form));
+    setSending(true); setSubmitted(false); setError("");
+    try {
+      await createReview({ ...data, rating });
+      setSubmitted(true); form.reset(); setRating(0);
+    } catch (submitError) { setError(submitError.message); }
+    finally { setSending(false); }
+  };
   return <>
     <PageBanner kicker="Customer stories" title="The confidence is mutual." description="A dedicated home for verified Tovia’s Luxe Hairs reviews, customer looks, and honest product experiences." />
-    <section className="reviews-page section">{verifiedReviews.length ? <div className="verified-review-grid">{verifiedReviews.map((review) => <article key={review.id}><div>{"★".repeat(Number(review.rating))}{"☆".repeat(5-Number(review.rating))}</div><blockquote>“{review.review}”</blockquote><p><b>{review.customer_name}</b><small>Verified order · {review.order_number}</small></p></article>)}</div> : <div className="reviews-empty"><div className="stars">★★★★★</div><Sparkles /><h2>Our verified reviews are coming soon.</h2><p>We won’t publish made-up testimonials. As genuine customer orders are completed, their approved experiences will appear here.</p><Link className="button button-primary" to="/shop">Explore the collection <ArrowRight /></Link></div>}<form className="review-form" onSubmit={(event) => { event.preventDefault(); if (!rating) return; const data = Object.fromEntries(new FormData(event.currentTarget)); const reviews = JSON.parse(localStorage.getItem("tovia-demo-reviews") || "[]"); localStorage.setItem("tovia-demo-reviews", JSON.stringify([{ ...data, id: `REV-${Date.now()}`, rating, status: "pending", created_at: new Date().toISOString() }, ...reviews])); setSubmitted(true); event.currentTarget.reset(); setRating(0); }}><span className="kicker">Already a customer?</span><h3>Share your Tovia’s experience.</h3><p>Your review will be checked against an order before it is published.</p><div className="rating-picker" aria-label="Choose a rating">{[1,2,3,4,5].map((value) => <button className={value <= rating ? "active" : ""} onClick={() => setRating(value)} type="button" key={value} aria-label={`${value} star${value === 1 ? "" : "s"}`}>{value <= rating ? "★" : "☆"}</button>)}</div>{!rating && <small className="rating-help">Choose a star rating</small>}<label>Order number<input required name="order_number" placeholder="e.g. TVL-1234567" /></label><label>Your name<input required name="customer_name" placeholder="Name shown with your review" /></label><label>Your review<textarea required name="review" placeholder="Tell us about your hair and experience" /></label>{submitted && <p className="form-success"><Check /> Thank you. Your review is ready for verification.</p>}<button className="button button-primary full-button">Submit for verification <ArrowRight /></button></form></section>
+    <section className="reviews-page section">{verifiedReviews.length ? <div className="verified-review-grid">{verifiedReviews.map((review) => <article key={review.id}><div>{"★".repeat(Number(review.rating))}{"☆".repeat(5-Number(review.rating))}</div><blockquote>“{review.review}”</blockquote><p><b>{review.customer_name}</b><small>Verified order · {review.order_number}</small></p></article>)}</div> : <div className="reviews-empty"><div className="stars">★★★★★</div><Sparkles /><h2>Our verified reviews are coming soon.</h2><p>We won’t publish made-up testimonials. As genuine customer orders are completed, their approved experiences will appear here.</p><Link className="button button-primary" to="/shop">Explore the collection <ArrowRight /></Link></div>}<form className="review-form" onSubmit={submitReview}><span className="kicker">Already a customer?</span><h3>Share your Tovia’s experience.</h3><p>Your review will be checked against an order before it is published.</p><div className="rating-picker" aria-label="Choose a rating">{[1,2,3,4,5].map((value) => <button className={value <= rating ? "active" : ""} onClick={() => setRating(value)} type="button" key={value} aria-label={`${value} star${value === 1 ? "" : "s"}`}>{value <= rating ? "★" : "☆"}</button>)}</div>{!rating && <small className="rating-help">Choose a star rating</small>}<label>Order number<input required name="order_number" placeholder="e.g. TVL-1234567" /></label><label>Your name<input required name="customer_name" placeholder="Name shown with your review" /></label><label>Your review<textarea required name="review" placeholder="Tell us about your hair and experience" /></label>{submitted && <p className="form-success"><Check /> Thank you. Your review is ready for verification.</p>}{error && <p className="form-error">{error}</p>}<button disabled={sending} className="button button-primary full-button">{sending ? "Submitting…" : "Submit for verification"} <ArrowRight /></button></form></section>
   </>;
 }
 
@@ -484,9 +505,9 @@ function LegalPage({ type }) {
   return <><PageBanner kicker="Tovia’s Luxe Hairs" title={privacy ? "Privacy policy." : "Website terms."} description={privacy ? "How customer information is handled when you browse, enquire, and place an order." : "The terms that support a clear and fair online shopping experience."} /><section className="legal-content section"><p className="legal-date">Last updated: November 12, 2026</p>{privacy ? <><h2>Information we collect</h2><p>When you place an order or submit a form, we may collect your name, phone number, email address, delivery address, order details, and the message you provide.</p><h2>How information is used</h2><p>Information is used to process orders, arrange delivery, provide customer support, prevent misuse, and improve the shopping experience. Customer order details are not intended for public display.</p><h2>Storage and service providers</h2><p>The storefront may use browser storage to remember a shopping bag. When backend services are activated, order information may be securely stored with Supabase and processed by relevant delivery or payment providers.</p><h2>Your choices</h2><p>You may contact Tovia’s to ask about your personal information or request a correction. Some order records may need to be retained for transaction and support purposes.</p></> : <><h2>Store information</h2><p>Product availability, confirmed specifications, prices, sale dates, gifts, and delivery terms shown at checkout form part of the order information. Unconfirmed catalogue content is clearly labelled as pending.</p><h2>Orders and payment</h2><p>An order is treated as pending until payment is completed and confirmed. Any installment started during the sale must be completed before the sale ends.</p><h2>Product care</h2><p>Human hair requires appropriate maintenance. Results and longevity depend on wear, handling, products, styling, and care. Follow the guidance supplied with the item and ask before applying strong chemicals or excessive heat.</p><h2>Website use</h2><p>You may use this website to browse and place genuine orders. Content, branding, and designs may not be copied or misrepresented as another business.</p></>}<h2>Contact</h2><p>Questions about these terms can be directed to <a href={`tel:${STORE_CONFIG.displayPhone}`}>{STORE_CONFIG.displayPhone}</a>.</p></section></>;
 }
 
-function WishlistPage({ wishlist, openProduct, onToggleWishlist }) {
-  const products = PRODUCTS.filter((product) => wishlist.includes(product.id));
-  return <><PageBanner kicker="Saved for later" title="Your luxe wishlist." description="Keep every texture that caught your eye in one place while you decide on the perfect crown." /><section className="wishlist-page section">{products.length ? <div className="product-grid">{products.map((product) => <ProductCard key={product.id} product={product} onSelect={openProduct} saved onToggleWishlist={onToggleWishlist} />)}</div> : <div className="wishlist-empty"><Heart /><h2>Nothing saved yet.</h2><p>Tap the heart on any product to keep it here for later.</p><Link className="button button-primary" to="/shop">Explore the collection <ArrowRight /></Link></div>}</section></>;
+function WishlistPage({ products = PRODUCTS, wishlist, openProduct, onToggleWishlist }) {
+  const savedProducts = products.filter((product) => wishlist.includes(product.id));
+  return <><PageBanner kicker="Saved for later" title="Your luxe wishlist." description="Keep every texture that caught your eye in one place while you decide on the perfect crown." /><section className="wishlist-page section">{savedProducts.length ? <div className="product-grid">{savedProducts.map((product) => <ProductCard key={product.id} product={product} onSelect={openProduct} saved onToggleWishlist={onToggleWishlist} />)}</div> : <div className="wishlist-empty"><Heart /><h2>Nothing saved yet.</h2><p>Tap the heart on any product to keep it here for later.</p><Link className="button button-primary" to="/shop">Explore the collection <ArrowRight /></Link></div>}</section></>;
 }
 
 function TrackOrderPage() {
@@ -501,18 +522,26 @@ function NotFoundPage() {
 function Footer() {
   const [subscribed, setSubscribed] = useState(false);
   return (
-    <footer><div className="footer-top"><div><Logo /><p>Luxury human hair for women who make every entrance count.</p><a href={STORE_CONFIG.instagramUrl} target="_blank" rel="noreferrer"><Camera /> Follow us on Instagram</a></div><div><small>Shop</small><Link to="/shop">All hairs</Link><Link to="/sale">Mega sale</Link><Link to="/wishlist">Wishlist</Link><Link to="/reviews">Reviews</Link><Link to="/quality">Our quality</Link></div><div><small>Help</small><Link to="/track-order">Track order</Link><Link to="/hair-guide">Order guide</Link><Link to="/hair-care">Hair care</Link><Link to="/delivery">Delivery & returns</Link><Link to="/faq">FAQs</Link><Link to="/contact">Contact us</Link></div><div><small>Company</small><Link to="/about">About Tovia’s</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><a href={`tel:${STORE_CONFIG.displayPhone}`}>{STORE_CONFIG.displayPhone}</a></div><div className="newsletter"><small>The luxe list</small><h3>Good hair news, first.</h3>{subscribed ? <p className="newsletter-success"><Check /> You’re on the luxe list.</p> : <form onSubmit={(event) => { event.preventDefault(); setSubscribed(true); }}><input required type="email" placeholder="Your email address" aria-label="Email address" /><button aria-label="Subscribe"><ArrowRight /></button></form>}</div></div><div className="footer-bottom"><span>© 2026 Tovia’s Luxe Hairs</span><span>Luxury in Every Strands ♡</span><span>Made for your soft life.</span></div></footer>
+    <footer><div className="footer-top"><div><Logo /><p>Luxury human hair for women who make every entrance count.</p><a href={STORE_CONFIG.instagramUrl} target="_blank" rel="noreferrer"><Camera /> Follow us on Instagram</a></div><div><small>Shop</small><Link to="/shop">All hairs</Link><Link to="/sale">Mega sale</Link><Link to="/wishlist">Wishlist</Link><Link to="/reviews">Reviews</Link><Link to="/quality">Our quality</Link></div><div><small>Help</small><Link to="/track-order">Track order</Link><Link to="/hair-guide">Order guide</Link><Link to="/hair-care">Hair care</Link><Link to="/delivery">Delivery & returns</Link><Link to="/faq">FAQs</Link><Link to="/contact">Contact us</Link></div><div><small>Company</small><Link to="/about">About Tovia’s</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><a href={`tel:${STORE_CONFIG.displayPhone}`}>{STORE_CONFIG.displayPhone}</a></div><div className="newsletter"><small>The luxe list</small><h3>Good hair news, first.</h3>{subscribed ? <p className="newsletter-success"><Check /> You’re on the luxe list.</p> : <form onSubmit={(event) => { event.preventDefault(); setSubscribed(true); }}><input required type="email" placeholder="Your email address" aria-label="Email address" /><button aria-label="Subscribe"><ArrowRight /></button></form>}</div></div><div className="footer-bottom"><span>© 2026 Tovia’s Luxe Hairs</span><span>Luxury in Every Strands ♡</span><span>Made for your soft life.</span><a href="https://chilltechltd.com" target="_blank" rel="noreferrer">Built and powered by chilltechltd.com</a></div></footer>
   );
 }
 
 export default function App() {
   const [cart, setCart] = useState(() => JSON.parse(localStorage.getItem("tovia-cart-v2") || "[]"));
   const [wishlist, setWishlist] = useState(() => JSON.parse(localStorage.getItem("tovia-wishlist") || "[]"));
+  const [products, setProducts] = useState(PRODUCTS);
   const [cartOpen, setCartOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const isCheckout = location.pathname === "/checkout";
   const isAdmin = location.pathname.startsWith("/admin");
+  useEffect(() => {
+    const hashType = new URLSearchParams(window.location.hash.slice(1)).get("type");
+    const queryType = new URLSearchParams(window.location.search).get("type");
+    if ([hashType, queryType].some((type) => type === "invite" || type === "recovery") && location.pathname !== "/admin/set-password") {
+      navigate({ pathname: "/admin/set-password", search: window.location.search, hash: window.location.hash }, { replace: true });
+    }
+  }, [location.pathname, navigate]);
   useEffect(() => {
     const routeTitles = {
       "/": "Tovia’s Luxe Hairs | Luxury in Every Strands",
@@ -537,6 +566,13 @@ export default function App() {
   }, [location.pathname]);
   useEffect(() => localStorage.setItem("tovia-cart-v2", JSON.stringify(cart)), [cart]);
   useEffect(() => localStorage.setItem("tovia-wishlist", JSON.stringify(wishlist)), [wishlist]);
+  useEffect(() => {
+    let active = true;
+    fetchStoreProducts().then((databaseProducts) => {
+      if (active && databaseProducts.length) setProducts(databaseProducts);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   useEffect(() => { document.body.style.overflow = cartOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [cartOpen]);
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
   const addToCart = (product, variant) => {
@@ -552,9 +588,9 @@ export default function App() {
     {!isCheckout && !isAdmin && <Header cartCount={cartCount} wishlistCount={wishlist.length} onCartOpen={() => setCartOpen(true)} />}
     <div className="route-view" id="main-content" key={location.pathname}>
       <Routes>
-        <Route path="/" element={<HomePage openProduct={openProduct} wishlist={wishlist} onToggleWishlist={toggleWishlist} />} />
-        <Route path="/shop" element={<ShopPage openProduct={openProduct} wishlist={wishlist} onToggleWishlist={toggleWishlist} />} />
-        <Route path="/sale" element={<SalePage openProduct={openProduct} wishlist={wishlist} onToggleWishlist={toggleWishlist} />} />
+        <Route path="/" element={<HomePage products={products} openProduct={openProduct} wishlist={wishlist} onToggleWishlist={toggleWishlist} />} />
+        <Route path="/shop" element={<ShopPage products={products} openProduct={openProduct} wishlist={wishlist} onToggleWishlist={toggleWishlist} />} />
+        <Route path="/sale" element={<SalePage products={products} openProduct={openProduct} wishlist={wishlist} onToggleWishlist={toggleWishlist} />} />
         <Route path="/quality" element={<QualityPage />} />
         <Route path="/hair-guide" element={<GuidePage />} />
         <Route path="/about" element={<AboutPage />} />
@@ -565,10 +601,11 @@ export default function App() {
         <Route path="/faq" element={<FAQPage />} />
         <Route path="/privacy" element={<LegalPage type="privacy" />} />
         <Route path="/terms" element={<LegalPage type="terms" />} />
-        <Route path="/wishlist" element={<WishlistPage wishlist={wishlist} openProduct={openProduct} onToggleWishlist={toggleWishlist} />} />
+        <Route path="/wishlist" element={<WishlistPage products={products} wishlist={wishlist} openProduct={openProduct} onToggleWishlist={toggleWishlist} />} />
         <Route path="/track-order" element={<TrackOrderPage />} />
         <Route path="/admin" element={<Suspense fallback={<div className="admin-loading"><span>T</span><p>Preparing your workspace…</p></div>}><AdminDashboard /></Suspense>} />
-        <Route path="/product/:productId" element={<ProductPage onAdd={addToCart} />} />
+        <Route path="/admin/set-password" element={<Suspense fallback={<div className="admin-loading"><span>T</span><p>Preparing secure access…</p></div>}><AdminDashboard /></Suspense>} />
+        <Route path="/product/:productId" element={<ProductPage products={products} onAdd={addToCart} />} />
         <Route path="/checkout" element={cart.length ? <Checkout cart={cart} onClose={() => navigate("/shop")} onComplete={() => setCart([])} /> : <Navigate to="/shop" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
